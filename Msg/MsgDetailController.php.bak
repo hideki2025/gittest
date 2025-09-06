@@ -1,0 +1,604 @@
+<?php
+
+namespace App\Controller\Msg;
+
+use App\Entity\User;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Twig\Environment;
+
+use App\Controller\Msg\MsgDetailModule;
+use App\Controller\Msg\MsgDetailFuncModule;
+use App\Controller\Common\BreadCrumbModule;
+use App\Controller\Common\CommonModule;
+use App\Services\TrainingService;
+use App\Controller\Parts\PartsMygroupModule;
+
+#[Route('/msg')]
+class MsgDetailController extends AbstractController
+{
+	public User $user;
+
+    public function __construct(private RequestStack $requestStack
+					,private Security $security
+					,private readonly BreadCrumbModule $bm
+    				,private readonly UrlGeneratorInterface $router
+    				,private readonly Environment $twig
+			    	,private readonly CommonModule $cmn
+    				,private readonly MsgDetailModule $mdm
+					,private readonly MsgDetailFuncModule $mdfm
+					,private readonly TrainingService $trainingService
+					,private readonly PartsMygroupModule $partsMygroupModule)
+    {
+		$this->user = $security->getUser();
+    }
+
+    #[Route(path: '/e/{mode}/{msg_no}/{ndata}/{caller}/',defaults:["ndata" => "_","caller" => "-"],name:'app_msg_detail')]
+	public function msgdetail(Request $request,$mode,$msg_no,$ndata,$caller){
+
+		//権限チェック
+		if ($msg_no != "0"){
+//2024-11-10追加
+			//$this->requestStack->getSession()->set('gw_msg/msg_no',$msg_no);
+			$login_id = $this->user->getUserId();
+			if ($this->cmn->fn_msg_role_get($msg_no,$login_id) == ""){
+				return $this->redirectToRoute('app_home');
+			}
+		}
+		// Get the message if there's training data
+		$training = $this->requestStack->getSession()->get('training');
+		if($training){
+			$caseNo = $training->case_no ?? $training->getCaseNo();
+			$mainMessage = $this->partsMygroupModule->msg_detail_get_msg_by_anken_no($caseNo);
+			if($mainMessage){
+				$msg_no = $mainMessage["msg_no"];
+				$mode = "view";
+			}
+		}
+
+//2024-12-28追加(コメント並び順の初期値セット 0:投稿日時順 1:返信関連順)
+		$this->requestStack->getSession()->set('comment_order',0);
+//2025-01-10追加
+		if ($this->requestStack->getSession()->has('msg_page_info')) {
+			$this->requestStack->getSession()->remove('msg_page_info');
+		}
+
+//2025-04-20追加
+		if ($this->requestStack->getSession()->has('msg-data')) {
+			$this->requestStack->getSession()->remove('msg-data');
+		}
+
+//2025-08-21追加
+		if ($this->requestStack->getSession()->has('mygroup_get')) {
+			$this->requestStack->getSession()->remove('mygroup_get');
+		}
+
+//2025-05-24追加(Myグループ設定からの戻り)
+/* 2025-06-02削除
+		if ($this->requestStack->getSession()->has('link_kind')) {
+			$link_kind = $this->requestStack->getSession()->get('link_kind');
+			if ($link_kind == "from-msg") {
+				$this->requestStack->getSession()->remove('link_kind');
+				if ($this->requestStack->getSession()->has('link_no')) {
+					$this->requestStack->getSession()->remove('link_no');
+				}
+			}
+		}
+*/
+		//戻り先IDの設定
+		$url = $request->getRequestUri();
+		$title_const = "メッセージ";
+		//$fmode = $this->requestStack->getSession()->get('fmode');
+		switch ($mode) {
+			case "view":
+				$chk = $this->bm->chkBbreadCrumbPath("msg_list");
+				if ($chk == 1){
+					$parent_id = "msg_list";
+				} else{
+					$parent_id = "msg_detail";
+				}
+
+				$id = "msg_detail";
+//2025-06-19追加
+/*
+				$chk = $this->bm->chkBbreadCrumbPath("msg_detail","all");
+				if ($chk == 1){
+					$parent_id = "msg_detail";
+					$chk = $this->bm->chkBbreadCrumbPath("msg_view","all");
+					if ($chk == 0){
+						$id = "msg_view";
+					}
+				}
+/*
+					$chk = $this->bm->chkBbreadCrumbPath("msg_new","all");
+					if ($chk == 0){
+						$chk = $this->bm->chkBbreadCrumbPath("msg_edit","all");
+						if ($chk == 0){
+							$chk = $this->bm->chkBbreadCrumbPath("msg_view","all");
+							if ($chk == 0){
+								$id = "msg_view";
+							}
+						}
+					}
+				}
+*/
+				//$parent_id = "msg";
+				$title = "";
+				//$this->requestStack->getSession()->set('fmode',$mode);
+				break;
+//2025-06-23追加
+			case "view2":
+				$parent_id = "msg_detail";
+				$id = "msg_view";
+				$title = "";
+				$mode = "view";
+				break;
+			case "edit":
+				$chk = $this->bm->chkBbreadCrumbPath("msg_list");
+				if ($chk == 1){
+					$parent_id = "msg_list";
+				} else{
+					$parent_id = "msg_detail";
+				}
+				
+				$id = "msg_detail";
+
+//2025-06-19追加
+				$chk = $this->bm->chkBbreadCrumbPath("msg_detail","all");
+				if ($chk == 1){
+					$parent_id = "msg";
+					$id = "msg_new";
+				}
+/*
+					if ($msg_no == 0) {
+						$id = "msg_new";
+					} else {
+						$id = "msg_edit";
+					}
+					$chk = $this->bm->chkBbreadCrumbPath($id,"all");
+					if ($chk == 1){
+						$id = "msg_detail";
+					}
+				}
+*/
+/*
+				if ($msg_no == 0) {
+					$id = "msg_new";
+				} else {
+					$id = "msg_detail";
+				}
+*/
+				$title = "{$title_const}の変更";
+				break;
+			case "delete":
+				$id = "msg_delete";
+				$parent_id = "msg";
+				$title = "{$title_const}の削除";
+				break;
+		}
+
+		//パンくず設定
+		$wk_caller = $this->bm->getBbreadCrumbCaller($id);
+		if ($wk_caller !== 0){
+			$caller = $wk_caller;
+		}
+		$this->bm->setBbreadCrumb($url,$id,$parent_id,"",$caller);
+
+		$msg_d =	[
+				 'mode'     => $mode
+				,'msg_no'   => $msg_no
+				,'ndata'    => $ndata
+				,'title'    => $title
+//2025-06-18追加
+				,'bm_id'    => $id
+			];
+
+		$this->requestStack->getSession()->set('msg_d',$msg_d);
+
+		$this->requestStack->getSession()->set('page','app_msg_detail');
+		return $this->redirectToRoute('app_index');
+
+	}
+
+    #[Route(path: '/ajax/upd',name:'app_msg_upd')]
+	public function ajaxMsgDetail(Request $request){
+
+//-- SecurityCheck --
+//		$this->get('common')->fn_isCsrfTokenValid($request);
+
+	 	$mode = $request->get('mode');
+	 	$msg_no = $request->get('msg_no');
+	 	$bm_id = $request->get('bm_id');
+
+//2025-06-16追加
+
+		$id = "msg_detail";
+
+//2025-06-19追加
+		$chg_mode = "";
+		$name = "";
+		switch ($mode) {
+			//編集
+			case "edit":
+				$chg_id = "msg_edit";
+//2025-06-21変更
+				if ($msg_no != "0") {
+					$chg_mode = "view";
+				}
+				$name = "メッセージ編集";
+				break;
+			//更新
+			case "update":
+				$chg_id = "msg_view";
+				$chg_mode = "view";
+				$name = "メッセージ表示";
+				break;
+			//キャンセル
+			case "cancel":
+				$chg_id = "msg_view";
+				$chg_mode = "view";
+				$name = "メッセージ表示";
+				break;
+		}
+
+		if ($bm_id == "msg_detail") {
+			$chg_id = $id;
+		}
+
+		//パンくず更新
+		if ($chg_mode != "" && $msg_no != 0) {
+			$chg_path = $this->router->generate('app_msg_detail',['mode' => $chg_mode,'msg_no' => $msg_no ]);
+			$ret = $this->bm->setBbreadCrumbPara($chg_id,"url",$chg_path);																																																																																																																																																																																																																																																																																																					
+			//$ret = $this->bm->setBbreadCrumbPara($chg_id,"name",$name);																																																																																																																																																																																																																																																																																																					
+			$bm_cont = $this->bm->setBbreadCrumb_chg($chg_id,$chg_path);
+		}
+
+		switch ($mode) {
+			//編集
+			case "edit":
+				$data = $this->mdfm->msg_detail_get("edit",$msg_no);
+				$data["bm_id"] = $bm_id;
+				$html = $this->twig->render('msg/_msg_detail_edit.twig',$data); 
+//2025-06-19変更([bm_cont]追加)
+				$ret = [ "status" => true, "html" => $html, "bm_cont" => $bm_cont];
+				break;
+			//更新
+			case "update":
+			 	$form = $request->get('form');
+			 	parse_str($form, $frm);
+
+			 	$save_mode = $request->get('save_mode');
+			 	$member_list = $request->get('member_list');
+			 	//メッセージ更新
+			   	$data = $this->mdm->msg_detail_update($frm,$msg_no,$member_list,$save_mode);
+				if ($data["status"] == false) {
+					$ret = $data;
+					break;
+				}
+
+				$data["data"]["bm_id"] = $bm_id;
+//2025-06-21追加
+				if ($msg_no == "0") {
+					$bm_cont = $data["bm_cont"];
+				}
+
+//2025-03-21追加(dataを退避)
+				$this->requestStack->getSession()->set('msg-data',$data["data"]);
+
+				$html = $this->twig->render('msg/_msg_detail_view.twig',$data["data"]); 
+//2025-06-19変更([bm_cont]追加)
+//2024-12-04変更([msg_no]追加)
+				$ret = [ "status" => true, "html" => $html, "bm_cont" => $bm_cont, "msg_no" => $data["data"]["msg"]["msg_no"] ];
+
+				break;
+			//削除
+			case "delete":
+//2025-05-17改修
+//				$data = $this->mdm->msg_detail_delete($msg_no);
+				$data = $this->mdfm->msg_detail_delete($msg_no);
+				$html = $this->twig->render('msg/_msg_detail_del.twig',$data["data"]); 
+				$ret = [ "status" => true, "html" => $html ];	
+
+				break;
+			//復元
+			case "restore":
+//2025-05-17改修
+//				$data = $this->mdm->msg_detail_restore($msg_no);
+				$data = $this->mdfm->msg_detail_restore($msg_no);
+				$data["data1"]["bm_id"] = $bm_id;
+				$html = $this->twig->render('msg/_msg_detail_view.twig',$data["data1"]); 
+				$html2 = $this->twig->render('msg/_msg_comment_view.twig',$data["data2"]); 
+				$ret = [ "status" => true, "html" => $html, "html2" => $html2 ];	
+
+				break;
+			//返信
+			case "reply":
+//				$data = $this->mdm->comment_detail_get("reply",$msg_no);
+				$data = $this->mdfm->comment_detail_get("reply",$msg_no);
+				$data["data"]["bm_id"] = $bm_id;
+				$html = $this->twig->render('msg/_msg_comment_edit.twig',$data); 
+
+				$ret = [ "status" => true, "html" => $html ];
+				
+				break;
+			//キャンセル
+			case "cancel":
+				$data = $this->mdfm->msg_detail_get("view",$msg_no);
+				$data["bm_id"] = $bm_id;
+				$html = $this->twig->render('msg/_msg_detail_view.twig',$data); 
+//2025-06-19変更([bm_cont]追加)
+				$ret = [ "status" => true, "html" => $html, "bm_cont" => $bm_cont ];
+				break;
+//2025-02-20追加
+			//バックアップ
+			case "backup":
+			 	$form = $request->get('form');
+			 	parse_str($form, $frm);
+
+			 	$save_mode = $mode;	//$request->get('save_mode');
+			 	$member_list = $request->get('member_list');
+			 	//メッセージ更新
+			   	$data = $this->mdm->msg_detail_update($frm,$msg_no,$member_list,$save_mode);
+				if ($data["status"] == false) {
+					$ret = $data;
+					break;
+				}
+
+				$ret = [ "status" => true, "html" => "" ];
+
+				break;
+		}
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+
+	}
+
+    #[Route(path: '/e/{msg_no}/{comment_no}/{caller}/',defaults:["caller" => "-"],name:'app_comment_detail')]
+	public function commentdetail(Request $request,$msg_no,$comment_no,$caller){
+		//権限チェック
+		if ($msg_no != "0"){
+//2024-10-27変更(引数:$login_id 追加)
+			$login_id = $this->user->getUserId();
+			if ($this->cmn->fn_msg_role_get($msg_no,$login_id) == ""){
+				return $this->redirectToRoute('app_home');
+			}
+		}
+
+		//戻り先IDの設定
+		$url = $request->getRequestUri();
+		$title_const = "メッセージ";
+                                                                                                                                                                                        
+		$mode = "view";
+//2025-06-18変更
+//		$id = "msg_view";
+		$id = "msg_detail";
+		$parent_id = "msg_detail";
+		$title = "";
+		$ndata = "_";
+		$caller = "-";
+//2025-06-18追加
+		//パンくず設定
+		$wk_caller = $this->bm->getBbreadCrumbCaller($id);
+		if ($wk_caller !== 0){
+			$caller = $wk_caller;
+		}
+
+		//パンくず設定
+		$this->bm->setBbreadCrumb($url,$id,$parent_id,"",$caller);
+
+		$msg_d =	[
+				 'mode'     => $mode
+				,'msg_no'   => $msg_no
+				,'ndata'    => $ndata
+				,"title"    => $title
+//2025-06-18追加
+				,'bm_id'    => $id
+			];
+
+//2025-02-20追加　不具合対応
+		if ($comment_no == "0"){
+			$comment_no = "";
+		}
+
+		$cross_comment_no = $msg_no . "," . $comment_no;
+//2025-06-17追加
+		$this->requestStack->getSession()->set('link_kind',"comment");
+		$this->requestStack->getSession()->set('cross_comment_no',$cross_comment_no);
+
+		$this->requestStack->getSession()->set('msg_d',$msg_d);
+
+		$this->requestStack->getSession()->set('page','app_msg_detail');
+		return $this->redirectToRoute('app_index');
+
+	}
+
+    #[Route(path: '/ajax/comment/upd',name:'app_msg_comment_upd')]
+    public function ajaxCommentDetail(Request $request)
+    {
+//-- SecurityCheck --
+//		$this->get('common')->fn_isCsrfTokenValid($request);
+
+	/* コメント編集 */
+	 	$mode = $request->get('mode');
+	 	$msg_no = $request->get('msg_no');
+	 	$comment_no = $request->get('comment_no');
+
+//2025-01-12追加(コメント並び順 0:投稿日時順 1:返信関連順)
+	 	$comment_order = $request->get('order_num');
+		$this->requestStack->getSession()->set('comment_order',$comment_order);
+
+		switch ($mode) {
+			//編集,返信
+			case "edit":
+			case "reply":
+//2025-05-17改修
+//				$data = $this->mdm->comment_detail_get($mode,$msg_no,$comment_no);
+				$data = $this->mdfm->comment_detail_get($mode,$msg_no,$comment_no);
+				$html = $this->renderView('msg/_msg_comment_edit.twig',$data);
+				$ret = [ "status" => true, "html" => $html ];
+				break;
+			//更新
+			case "update":
+			 	$form = $request->get('form');
+			 	parse_str($form, $frm);
+			 	$member_list = $request->get('member_list');
+			 	//コメント更新
+//2025-05-17改修
+//			   	$data = $this->mdm->msg_comment_detail_update($frm,$member_list);
+			   	$data = $this->mdfm->msg_comment_detail_update($frm,$member_list);
+				if ($data["status"] == false) {
+					$ret = $data;
+					break;
+				}
+
+				$html = $this->twig->render('msg/_msg_comment_view.twig',$data["data"]);
+				$ret = [ "status" => true, "html" => $html, "comment_no" => $data["comment_no"] ];
+
+				break;
+			//削除
+			case "delete":
+//2025-05-17改修
+//				$data = $this->mdm->msg_detail_comment_delete($msg_no,$comment_no);
+				$data = $this->mdfm->msg_detail_comment_delete($msg_no,$comment_no);
+				$html = $this->twig->render('msg/_msg_comment_view.twig',$data);
+				$ret = [ "status" => true, "html" => $html ];
+
+				break;
+			//復元
+			case "restore":
+//2025-05-17改修
+//				$data = $this->mdm->msg_detail_comment_restore($msg_no,$comment_no);
+				$data = $this->mdfm->msg_detail_comment_restore($msg_no,$comment_no);
+				$html = $this->twig->render('msg/_msg_comment_view.twig',$data);
+				$ret = [ "status" => true, "html" => $html ];
+
+				break;
+			//キャンセル
+			case "cancel":
+//2025-05-17改修
+//				$data = $this->mdm->comment_detail_get("view",$msg_no,$comment_no);
+				$data = $this->mdfm->comment_detail_get("view",$msg_no,$comment_no);
+				$html = $this->renderView('msg/_msg_comment_view.twig',$data);
+				$ret = [ "status" => true, "html" => $html, "comment_no" => $comment_no ];
+				break;
+		}
+
+//2025-03-21追加([msg_read_f]:0:メッセージ表示中 1:メッセージ編集中)
+		$msg_read_f = $request->get('msg_read_f');
+		//1:メッセージ編集中の場合のみ、データ再取得しViewに切り替える
+		if ($msg_read_f == 1) {
+			//msg_viewの作成
+			//メッセージ編集中にコメント(編集,返信,削除)等を行う場合に、メッセージをviewに切り替えるために使用)
+			//sessionが存在する場合は、sessionより取得
+			if ($this->requestStack->getSession()->has('msg-data')) {
+				$data = $this->requestStack->getSession()->get('msg-data');
+			} else {
+				$data = $this->mdfm->msg_detail_get("view",$msg_no);
+			}
+			$html_msg = $this->twig->render('msg/_msg_detail_view.twig',$data); 
+			$ret["html_msg"] = $html_msg;
+		} else {
+			$ret["html_msg"] = "";
+		}
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+	}
+
+//2024-12-07追加
+    #[Route(path: '/ajax/comment/link',name:'app_msg_comment_link')]
+    public function ajaxCommentDetailLink(Request $request)
+    {
+	 	$msg_no = $request->get('msg_no');
+	 	$comment_no = $request->get('comment_no');
+
+		$this->requestStack->getSession()->set('link_no_comment',$comment_no);
+
+//2025-05-17改修
+//		$data = $this->mdm->comment_detail_get("view",$msg_no);
+		$data = $this->mdfm->comment_detail_get("view",$msg_no);
+		$html = $this->renderView('msg/_msg_comment_view.twig',$data);
+		$ret = [ "status" => true, "html" => $html ];
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+	}
+
+	#[Route(path: '/ajax/comment/view', name: 'app_msg_comment_view',methods:["post"])]
+    public function comment_detail_view(Request $request)
+    {
+	 	$msg_no = $request->get('msg_no');
+	 	$page_num = $request->get('page_num');
+		$this->requestStack->getSession()->set('msg_page',$page_num);
+//2024-12-28追加
+	 	$order_num = $request->get('order_num');
+		$this->requestStack->getSession()->set('comment_order',$order_num);
+
+//2025-03-19追加
+	 	$all_summary_f = $request->get('all_summary_f');
+		$this->requestStack->getSession()->set('comment_all_summary_f',$all_summary_f);
+
+//2025-05-17改修
+//		$data = $this->mdm->comment_detail_get("view",$msg_no);
+		$data = $this->mdfm->comment_detail_get("view",$msg_no);
+		$html = $this->renderView('msg/_msg_comment_view.twig',$data);
+		$ret = [ "status" => true, "html" => $html ];
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+    }
+
+	#[Route(path: '/detail/del/{msg_no}', name: 'app_msg_del',methods:["post"])]
+    public function msg_detail_delete(Request $request,$msg_no)
+    {
+	 	//メッセージ削除
+//2025-05-17改修
+//	   	$ret = $this->mdm->msg_detail_delete($msg_no);
+	   	$ret = $this->mdfm->msg_detail_delete($msg_no);
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+    }
+
+	#[Route(path: '/detail/pin', name: 'app_msg_pin',methods:["post"])]
+    public function msg_detail_pin(Request $request)
+    {
+	 	//メッセージPIN登録
+	 	$msg_no = $request->get('msg_no');
+	 	$pin_f = $request->get('pin_f');
+//2025-05-17改修
+//	   	$ret = $this->mdm->msg_detail_pin($msg_no,$pin_f);
+	   	$ret = $this->mdfm->msg_detail_pin($msg_no,$pin_f);
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+    }
+
+	#[Route(path: '/ajax/user/update', name: 'app_msg_user_update_ajax',methods:["post"])]
+    public function ajaxUserUpdatePostAction(Request $request)
+    {
+// 2024-05-10追加 -- SecurityCheck --
+//		$this->get('common')->fn_isCsrfTokenValid($request);
+
+	//メッセージ_ユーザー情報更新
+	 	$msg_no = $request->request->get('msg_no');
+	 	$comment_no = $request->request->get('comment_no');
+	 	$reaction_no = $request->request->get('reaction_no');
+
+//2025-05-17改修
+//		$ret = $this->mdm->msg_user_update($msg_no,$comment_no,$reaction_no);
+		$ret = $this->mdfm->msg_user_update($msg_no,$comment_no,$reaction_no);
+
+		header("Content-Type: application/json;charset=utf-8");
+		return new Response(json_encode($ret));
+	}
+
+}
